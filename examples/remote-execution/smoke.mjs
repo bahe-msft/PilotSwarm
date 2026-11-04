@@ -29,7 +29,7 @@ try {
         const before = await events(session.sessionId, user);
         const afterSeq = Math.max(0, ...before.map(event => event.seq));
         const prompt = phase === "first"
-            ? `Use sandbox_exec to run exactly: printf '%s' '${nonce}' > proof.txt; cat proof.txt; hostname. Report the file contents after checking the tool result.`
+            ? `Use sandbox_exec to run this exact shell command:\n\n\`\`\`sh\nprintf '%s' '${nonce}' > proof.txt; cat proof.txt; hostname\n\`\`\`\n\nReport the file contents after checking the tool result.`
             : "Use sandbox_exec to read proof.txt from the existing remote working folder and run hostname. Do not write or recreate the file. Report its contents.";
         const answer = await session.sendAndWait(prompt, 180_000);
         assert.ok(answer.includes(nonce), "real model answer must include the verified file contents");

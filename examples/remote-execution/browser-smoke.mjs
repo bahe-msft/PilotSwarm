@@ -35,7 +35,7 @@ try {
     assert.ok(created?.sessionId, "browser must create a real portal session");
     const nonce = `browser-${randomUUID()}`;
     const composer = page.getByTestId("composer-input");
-    await composer.fill(`Use sandbox_exec to run exactly: printf '%s' '${nonce}' > browser-proof.txt; cat browser-proof.txt; hostname. Report the verified file contents.`);
+    await composer.fill(`Use sandbox_exec to run this exact shell command:\n\n\`\`\`sh\nprintf '%s' '${nonce}' > browser-proof.txt; cat browser-proof.txt; hostname\n\`\`\`\n\nReport the verified file contents.`);
     await composer.press("Enter");
     const { job } = await waitForRemoteResult(created.sessionId, "alice", 0, nonce);
     await page.locator(".ps-chat-call").first().waitFor({ timeout: 30_000 });
