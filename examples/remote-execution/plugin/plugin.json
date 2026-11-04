@@ -1,0 +1,6 @@
+{
+  "name": "remote-execution",
+  "version": "1.0.0",
+  "description": "Agents with per-session remote working folders.",
+  "portal": {"branding": {"title": "PilotSwarm Remote Execution"}}
+}

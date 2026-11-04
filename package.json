@@ -24,6 +24,7 @@
     "build": "npm run build --workspace=packages/sdk && npm run build --workspace=pilotswarm-horizon-store && npm run build --workspace=pilotswarm",
     "dev": "npm run dev --workspace=packages/sdk",
     "test": "npm test --workspace=packages/sdk",
+    "test:remote-execution": "npm run build --workspace=packages/sdk && node --test examples/remote-execution/test/*.test.mjs packages/sdk/test/unit/tool-execution-allowlist.test.mjs",
     "test:local": "npm run test:local --workspace=packages/sdk",
     "test:local:smoke": "npm run test:local:smoke --workspace=packages/sdk",
     "test:local:durability": "npm run test:local:durability --workspace=packages/sdk",

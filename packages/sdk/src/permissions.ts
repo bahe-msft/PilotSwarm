@@ -1,4 +1,21 @@
-import type { PermissionRequestResult } from "@github/copilot-sdk";
+import type { PermissionRequestResult, SessionConfig } from "@github/copilot-sdk";
+
+/** Worker-owned execution policy; session hooks cannot allow a tool outside this set. */
+export function withToolExecutionAllowlist(
+    hooks: SessionConfig["hooks"],
+    allowed: ReadonlySet<string> | undefined,
+): SessionConfig["hooks"] {
+    if (allowed === undefined) return hooks;
+    return {
+        ...hooks,
+        onPreToolUse: async (input, invocation) => {
+            if (!allowed.has(input.toolName)) {
+                return { permissionDecision: "deny", permissionDecisionReason: "Tool execution is disabled by this worker's policy." };
+            }
+            return await hooks?.onPreToolUse?.(input, invocation) ?? {};
+        },
+    };
+}
 
 type PermissionRequestLike = {
     kind?: string;

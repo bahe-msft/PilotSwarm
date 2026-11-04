@@ -1,4 +1,5 @@
 .claude
+.local
 .env
 .env.*
 .git
