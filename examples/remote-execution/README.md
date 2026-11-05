@@ -43,9 +43,29 @@ export async function createProvider({ stateDir }) {
 - `execute(invocationId, {command, timeoutMs})`: return the executor job result.
 - `health()`: return `{executor: "opaque-hostname"}`.
 
+A provider with retained workspaces also returns:
+
+```javascript
+environment: {
+    workspaceId: "opaque-stable-workspace", // stable across compute replacements
+    generation: 2,                       // increases when compute is replaced
+    restored: true,
+}
+```
+
+The worker revalidates the provider on every tool call; only simultaneous `ensure` calls are coalesced. After replacement, `sandbox_exec` returns `environment_changed` **without running the requested command** until the model supplies the reported `environmentGeneration`. Every subsequent command in that restored generation must include it. A stale generation cannot authorize execution in a newer environment. `executor_info` also reports the current environment.
+
 `client.mjs` supplies `SandboxClient` for HTTP endpoints. Its optional `transport` function lets an operator adapt routing and authentication without adding provider-specific behavior here. The worker derives `sessionId` and tool-call identity from the trusted SDK invocation, not model arguments.
 
-The provider must persist allocation bindings under `stateDir`, serialize concurrent creation, and recover the same allocation after worker replacement. It must not issue another blind create when a previous result is uncertain. Missing, inaccessible, or expired allocations require an explicit provider policy; this example does not silently fall back to local execution. In-process caching deduplicates concurrent calls but is not a distributed allocation lease.
+The provider must persist allocation bindings under `stateDir`, serialize concurrent creation, and recover the same allocation after worker replacement. It must not issue another blind create when a previous result is uncertain. Missing, inaccessible, or expired allocations require an explicit provider policy; this example does not silently fall back to local execution. In-process coalescing deduplicates concurrent calls but is not a distributed allocation lease.
+
+### Returning after a long idle period
+
+Conversation persistence and workspace persistence are separate. A retained-workspace provider must keep a stable, owner-checked workspace independently of its short-lived executor. After a recorded lease expires, it must confirm retirement through its authenticated management service, attach the same retained workspace to fresh compute, and atomically publish a new binding and generation. Missing storage, changed ownership, authentication failures, and ambiguous create/retire outcomes must fail closed; a 404 alone is not permission to create an empty replacement.
+
+Keep completed invocation receipts with the retained workspace so a cooperative retry after replacement can return the prior result. Pending invocation claims must remain unknown rather than rerunning side effects. An executor-local journal cannot provide this property after that executor disappears.
+
+Restoration recovers retained files, not RAM, background processes, open connections, or files outside the retained mount. The environment acknowledgement makes that distinction visible to the agent before another command runs. Retention and deletion policy, volume authorization, storage attachment fencing, and cleanup remain provider responsibilities. This example does not provision storage or promise a retention period for an arbitrary provider.
 
 ### Executor image and environment
 
@@ -139,5 +159,5 @@ These tests cover protocol bounds, authentication, cancellation, duplicate/lost 
 
 - Copilot SDK/CLI stays on the trusted worker; only shell/file execution moves remotely.
 - Remote files are accessed through `sandbox_exec`; the portal Workspace pane is not remotely mounted.
-- Conversation snapshots persist on the worker volume. Workspace lifetime depends on the runtime provider.
+- Conversation snapshots persist on the worker volume. Workspace lifetime depends on the runtime provider. Retained providers can replace expired compute without replacing the workspace; ephemeral providers cannot recover files from a deleted allocation.
 - Committed-turn recovery is tested. Active-turn takeover, arbitrary external-effect idempotency, multi-worker allocation fencing, and production network isolation need separate validation.

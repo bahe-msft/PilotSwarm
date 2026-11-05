@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { PilotSwarmWorker, FilesystemSessionStore, defineTool } from "pilotswarm-sdk";
 import { loadAllocations } from "./allocations.mjs";
+import { executeRemote, executorInfo } from "./remote-tools.mjs";
 import { json, listen, close } from "./http.mjs";
 
 function required(name) {
@@ -31,28 +32,22 @@ const worker = new PilotSwarmWorker({
 });
 worker.registerTools([
     defineTool("sandbox_exec", {
-        description: "Run a shell command in this session's remote working folder. All file reads, writes, scripts, and shell commands must use this tool. The working folder persists across turns while the allocation lives.",
+        description: "Run a shell command in this session's remote working folder. All file operations must use this tool. If the result reports environment_changed, no command ran: inspect the notice and acknowledge its current environmentGeneration when retrying. Previous processes do not survive environment replacement.",
         parameters: {
             type: "object", additionalProperties: false,
-            properties: { command: { type: "string", maxLength: 16_384 }, timeoutMs: { type: "integer", minimum: 1, maximum: 30_000 } },
+            properties: {
+                command: { type: "string", maxLength: 16_384 },
+                timeoutMs: { type: "integer", minimum: 1, maximum: 30_000 },
+                environmentGeneration: { type: "integer", minimum: 1, description: "Current generation from an environment_changed notice. Required after environment replacement; never guess it." },
+            },
             required: ["command"],
         },
-        handler: async (input, invocation) => {
-            if (!invocation.durableSessionId || !invocation.toolCallId) throw new Error("durable invocation identity required");
-            const allocation = await allocations.ensure(invocation.durableSessionId);
-            return JSON.stringify(await allocation.client.execute(`${invocation.durableSessionId}:${invocation.toolCallId}`, {
-                command: input.command, timeoutMs: input.timeoutMs ?? 10_000,
-            }));
-        },
+        handler: async (input, invocation) => JSON.stringify(await executeRemote(allocations, input, invocation)),
     }),
     defineTool("executor_info", {
         description: "Show the opaque allocation identifier and executor hostname for this session.",
         parameters: { type: "object", properties: {}, additionalProperties: false },
-        handler: async (_input, invocation) => {
-            const allocation = await allocations.ensure(invocation.durableSessionId);
-            const health = await allocation.client.health();
-            return JSON.stringify({ allocationId: allocation.allocationId, executor: health.executor });
-        },
+        handler: async (_input, invocation) => JSON.stringify(await executorInfo(allocations, invocation)),
     }),
 ]);
 await worker.start();

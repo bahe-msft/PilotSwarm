@@ -17,10 +17,17 @@ export class Allocations {
                 || typeof result.client?.execute !== "function" || typeof result.client?.health !== "function") {
                 throw new Error("provider must return {allocationId, client: {execute, health}}");
             }
+            if (result.environment !== undefined) {
+                if (!result.environment || typeof result.environment !== "object") throw new Error("provider environment must be an object");
+                const { workspaceId, generation, restored } = result.environment;
+                if (typeof workspaceId !== "string" || !workspaceId || !Number.isSafeInteger(generation)
+                    || generation < 1 || typeof restored !== "boolean") {
+                    throw new Error("provider environment requires workspaceId, positive generation and restored flag");
+                }
+            }
             return result;
-        }).catch(error => {
-            this.pending.delete(sessionId);
-            throw error;
+        }).finally(() => {
+            if (this.pending.get(sessionId) === allocation) this.pending.delete(sessionId);
         });
         this.pending.set(sessionId, allocation);
         return allocation;
