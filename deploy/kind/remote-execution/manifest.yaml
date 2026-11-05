@@ -1,0 +1,194 @@
+# Local development only. No ingress or public LoadBalancer is created.
+apiVersion: v1
+kind: Namespace
+metadata: {name: pilotswarm-remote}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: database, namespace: pilotswarm-remote}
+stringData:
+  POSTGRES_USER: pilotswarm
+  POSTGRES_PASSWORD: local-development-only
+  POSTGRES_DB: pilotswarm
+  DATABASE_URL: postgresql://pilotswarm:local-development-only@postgres.pilotswarm-remote.svc.cluster.local:5432/pilotswarm?sslmode=disable
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: environment, namespace: pilotswarm-remote}
+data:
+  PILOTSWARM_DUROXIDE_SCHEMA: remote_duroxide
+  PILOTSWARM_CMS_SCHEMA: remote_cms
+  PILOTSWARM_FACTS_SCHEMA: remote_facts
+  PS_MODEL_PROVIDERS_PATH: /etc/model/model-providers.json
+  PLUGIN_DIRS: /app/examples/remote-execution/plugin
+  PILOTSWARM_WORKER_SHUTDOWN_TIMEOUT_MS: "5000"
+  HOME: /state
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: database, namespace: pilotswarm-remote}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: worker-data, namespace: pilotswarm-remote}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 2Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: postgres, namespace: pilotswarm-remote}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata: {labels: {app: postgres}}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:17-bookworm
+          envFrom: [{secretRef: {name: database}}]
+          env: [{name: PGDATA, value: /var/lib/postgresql/data/pgdata}]
+          readinessProbe: {exec: {command: [pg_isready, -U, pilotswarm]}, periodSeconds: 2}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+      volumes: [{name: data, persistentVolumeClaim: {claimName: database}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: postgres, namespace: pilotswarm-remote}
+spec: {selector: {app: postgres}, ports: [{port: 5432}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: model, namespace: pilotswarm-remote}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: model}}
+  template:
+    metadata: {labels: {app: model}}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: model
+          image: localhost/pilotswarm-remote-executor:dev
+          imagePullPolicy: Never
+          command: [node, examples/remote-execution/model-relay.mjs]
+          env:
+            - name: MODEL_RELAY_TOKEN
+              valueFrom: {secretKeyRef: {name: model-relay, key: token}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          readinessProbe: {httpGet: {path: /health, port: 8081}, periodSeconds: 2}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: model, namespace: pilotswarm-remote}
+spec: {selector: {app: model}, ports: [{port: 8081}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: worker, namespace: pilotswarm-remote}
+spec:
+  replicas: 0
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: worker}}
+  template:
+    metadata: {labels: {app: worker}}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 20
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: worker
+          image: localhost/pilotswarm-remote:dev
+          imagePullPolicy: Never
+          envFrom: [{configMapRef: {name: environment}}]
+          env:
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: database, key: DATABASE_URL}}
+            - name: MODEL_RELAY_TOKEN
+              valueFrom: {secretKeyRef: {name: model-relay, key: token}}
+            - {name: REMOTE_STATE_DIR, value: /data}
+            - {name: SESSION_STATE_DIR, value: /state/session-state}
+            - {name: REMOTE_PROVIDER_MODULE, value: /etc/remote/provider.mjs}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          readinessProbe: {httpGet: {path: /health, port: 8080}, periodSeconds: 2}
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "2", memory: 2Gi}
+          volumeMounts:
+            - {name: state, mountPath: /state}
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+            - {name: provider, mountPath: /etc/remote, readOnly: true}
+            - {name: model, mountPath: /etc/model, readOnly: true}
+      volumes:
+        - {name: state, emptyDir: {}}
+        - {name: data, persistentVolumeClaim: {claimName: worker-data}}
+        - {name: tmp, emptyDir: {}}
+        - {name: provider, secret: {secretName: runtime-provider, defaultMode: 288}}
+        - {name: model, secret: {secretName: model-config, defaultMode: 288}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: portal, namespace: pilotswarm-remote}
+spec:
+  replicas: 0
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: portal}}
+  template:
+    metadata: {labels: {app: portal}}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: portal
+          image: localhost/pilotswarm-remote:dev
+          imagePullPolicy: Never
+          command: [node, packages/app/web/server.js]
+          envFrom: [{configMapRef: {name: environment}}]
+          env:
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: database, key: DATABASE_URL}}
+            - name: MODEL_RELAY_TOKEN
+              valueFrom: {secretKeyRef: {name: model-relay, key: token}}
+            - {name: PORTAL_MODE, value: remote}
+            - {name: PORTAL_AUTH_PROVIDER, value: dev}
+            - {name: PORTAL_AUTH_DEV_ALLOW, value: "true"}
+            - {name: AUTHZ_ENFORCE_OWNERSHIP, value: "true"}
+            - {name: SESSIONS_DEFAULT_VISIBILITY, value: private}
+            - {name: AUTHZ_ADMIN_SCOPE, value: cluster}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          readinessProbe: {httpGet: {path: /api/health, port: 3001}, periodSeconds: 2}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          volumeMounts:
+            - {name: state, mountPath: /state}
+            - {name: tmp, mountPath: /tmp}
+            - {name: model, mountPath: /etc/model, readOnly: true}
+      volumes:
+        - {name: state, emptyDir: {}}
+        - {name: tmp, emptyDir: {}}
+        - {name: model, secret: {secretName: model-config, defaultMode: 288}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: portal, namespace: pilotswarm-remote}
+spec: {selector: {app: portal}, ports: [{port: 3001}]}

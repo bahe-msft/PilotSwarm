@@ -3,6 +3,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
+# Local runtime adapters, credentials, and deployment inputs
+/.local/
+
 # User-specific files
 *.rsuser
 *.suo

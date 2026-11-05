@@ -5486,7 +5486,7 @@ let canvasDrawChain: Promise<void> = Promise.resolve();
                     await sdk.stop();
                     return "";
                 }
-                const tempSession = await sdk.createSession(sessionOpts);
+                const tempSession = await sdk.createSession(sessionManager.applyToolExecutionPolicy(sessionOpts));
                 let title = "";
                 await new Promise<void>((resolve, reject) => {
                     tempSession.on("assistant.message", (event: any) => {
@@ -6170,6 +6170,7 @@ let canvasDrawChain: Promise<void> = Promise.resolve();
             catalog,
             artifactStore: artifactStore ?? null,
             resolveModelOptions: (ref?: string) => sessionManager.resolveModelSessionOptions(ref),
+            applySessionPolicy: <T extends object>(config: T) => sessionManager.applyToolExecutionPolicy(config),
             fallbackDistillerModel: process.env.PILOTSWARM_DISTILLER_FALLBACK_MODEL || undefined,
             trace: (message: string) => activityCtx.traceInfo(`[regen] ${message}`),
         };

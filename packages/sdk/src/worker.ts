@@ -404,6 +404,7 @@ export class PilotSwarmWorker {
             this.sessionStore,
             {
                 reservedFactPrefixes: options.reservedFactPrefixes,
+                toolExecutionAllowlist: options.toolExecutionAllowlist === undefined ? undefined : new Set(options.toolExecutionAllowlist),
                 frameworkBasePrompt: this._frameworkBasePrompt ?? undefined,
                 frameworkBaseToolNames: this._frameworkBaseToolNames,
                 appDefaultPrompt: this._appDefaultPrompt ?? undefined,

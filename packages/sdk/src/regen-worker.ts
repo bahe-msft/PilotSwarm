@@ -79,6 +79,8 @@ export interface RegenDistillResult {
 
 export interface RegenWorkerDeps {
     catalog: SessionCatalog;
+    /** Worker policy for the optional ephemeral distiller client. */
+    applySessionPolicy?<T extends object>(config: T): T;
     artifactStore: ArtifactStore | null;
     /**
      * Resolve a model ref to SDK session options ({model, provider} or
@@ -662,11 +664,12 @@ export async function runRegenDistill(
                 env: { ...process.env, COPILOT_HOME: tempHome },
             }, resolved!.provider, resolved!.toolCatalog);
             await sdk.start();
-            const session: any = await sdk.createSession({
+            const sessionConfig = {
                 ...(resolved!.model ? { model: resolved!.model } : {}),
                 ...(resolved!.provider ? { provider: resolved!.provider } : {}),
                 onPermissionRequest: approvePermissionForSession,
-            });
+            };
+            const session: any = await sdk.createSession(deps.applySessionPolicy ? deps.applySessionPolicy(sessionConfig) : sessionConfig);
             ephemeralSessionId = session.id ?? null;
             return await new Promise<string>((resolve, reject) => {
                 let latest = "";

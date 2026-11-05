@@ -1,0 +1,5 @@
+FROM docker.io/library/node:24.22.1-trixie-slim
+WORKDIR /app
+COPY --chown=node:node examples/remote-execution/ /app/examples/remote-execution/
+USER node
+ENTRYPOINT ["node", "examples/remote-execution/executor.mjs"]

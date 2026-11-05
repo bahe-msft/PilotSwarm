@@ -48,7 +48,7 @@ import type { GraphStore } from "./graph-store.js";
 import { buildKnowledgePromptBlocks, loadKnowledgeIndexFromFactStore, buildEnhancedRetrievalPromptBlock, buildGraphReaderPromptBlock } from "./knowledge-index.js";
 import { composeStructuredSystemMessage, extractPromptContent, mergePromptSections } from "./prompt-layering.js";
 import { buildPromptLayersEventPayload, type PromptLayerDescriptor } from "./prompt-layers.js";
-import { approvePermissionForSession } from "./permissions.js";
+import { approvePermissionForSession, withToolExecutionAllowlist } from "./permissions.js";
 import { createHash } from "node:crypto";
 import { readSnapshotMarker, supportsVersionedSnapshots, writeSnapshotMarker } from "./snapshot-protocol.js";
 import fs from "node:fs";
@@ -235,6 +235,7 @@ export function pickAgentCopyByPackageIdForOwner(
 
 /** Worker-level defaults — applied to every session. */
 export interface WorkerDefaults {
+    toolExecutionAllowlist?: ReadonlySet<string>;
     getCapabilitySources?: () => CapabilitySource[];
     /** Host-reserved fact key prefixes, see PilotSwarmWorkerOptions.reservedFactPrefixes. */
     reservedFactPrefixes?: string[];
@@ -890,6 +891,15 @@ export class SessionManager {
      */
     artifactStore: import("./session-store.js").ArtifactStore | null = null;
 
+    /** Apply the same worker policy to managed and auxiliary SDK sessions. */
+    applyToolExecutionPolicy<T extends object>(config: T): T {
+        if (this.workerDefaults.toolExecutionAllowlist === undefined) return config;
+        return {
+            ...config,
+            hooks: withToolExecutionAllowlist((config as Pick<SessionConfig, "hooks">).hooks, this.workerDefaults.toolExecutionAllowlist),
+        };
+    }
+
     /** Store full config (with tools/hooks) for a session. Called by PilotSwarmClient. */
     setConfig(sessionId: string, config: ManagedSessionConfig): void {
         this.sessionConfigs.set(sessionId, config);
@@ -1412,20 +1422,22 @@ export class SessionManager {
 
     /** `client.createSession`, after the client's shared start. */
     private _createCopilotSession(client: CopilotClient, config: SessionConfig): Promise<CopilotSession> {
+        const guarded = this.applyToolExecutionPolicy(config);
         const starting = this._startClient(client);
-        return starting ? starting.then(() => client.createSession(config)) : client.createSession(config);
+        return starting ? starting.then(() => client.createSession(guarded)) : client.createSession(guarded);
     }
 
     /** `client.resumeSession`, after the client's shared start. */
     private _resumeCopilotSession(
         client: CopilotClient,
         sessionId: string,
-        config: Parameters<CopilotClient["resumeSession"]>[1],
+        config: NonNullable<Parameters<CopilotClient["resumeSession"]>[1]>,
     ): Promise<CopilotSession> {
+        const guarded = this.applyToolExecutionPolicy(config);
         const starting = this._startClient(client);
         return starting
-            ? starting.then(() => client.resumeSession(sessionId, config))
-            : client.resumeSession(sessionId, config);
+            ? starting.then(() => client.resumeSession(sessionId, guarded))
+            : client.resumeSession(sessionId, guarded);
     }
 
     /**

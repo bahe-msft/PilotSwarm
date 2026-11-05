@@ -1277,6 +1277,12 @@ export interface SessionPolicy {
 export interface PilotSwarmWorkerOptions {
     store: string;
     /**
+     * Worker-owned tool execution allowlist, applied to every session's
+     * pre-tool hook. An empty list denies all tools; omitted leaves the
+     * existing policy unchanged. This restricts tool calls, not the CLI process.
+     */
+    toolExecutionAllowlist?: string[];
+    /**
      * Fact key prefixes reserved for tools, in addition to the built-in
      * `tools/`. No agent can read, write, delete or search under them; a
      * worker-registered tool reaches them through `invocation.facts`.
